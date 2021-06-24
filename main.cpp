@@ -4,6 +4,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "profile_timer.hpp"
+
 //types to be used
 typedef std::chrono::high_resolution_clock Clock;
 
@@ -47,12 +49,12 @@ union Transaction {
 
 //the building block of the chain
 struct Block {
+	unsigned nonce; //must be first member
+	unsigned threshold; //store my own hash threshold
 	unsigned index;
 	unsigned prevHash;
 	Clock::duration timestamp;
 	Transaction transaction;
-	unsigned nonce;
-	unsigned threshold; //store my own hash threshold
 };
 
 //checks
@@ -198,28 +200,41 @@ Block generateBlock(Transaction transaction, unsigned prevHash) {
 
 unsigned hashBlock(Block& block, unsigned const threshold) {
 	unsigned hash = -1;
-	unsigned nonce = 0;
+	block.nonce = 0;
 	block.threshold = threshold;
-	while (hash > threshold) {
-		block.nonce = nonce++;
+
+	while (hash > block.threshold) {
+		block.nonce++;
 		hash = fnv_hash_1a_32(&block, sizeof(Block));
+		if (block.nonce == 0) {
+			block.threshold++; //BUGFIX: increase the threshold if it's done a full loop
+			std::cout << "threshold adjusted" << std::endl;
+		}
+
+		if (block.nonce % 1000000 == 0) {
+			std::cout << block.nonce / 1000000 << std::endl;
+		}
 	}
+	std::cout << "hash found" << std::endl;
 	return hash;
 }
 
 //high-level actions
-constexpr unsigned threshold = 1 << 20;
+constexpr unsigned threshold = 1 << 8;
 
 int sendAmount(unsigned sender, unsigned receiver, unsigned amount) {
+	if (sender == receiver || receiver == 0) {
+		return -1;
+	}
 
 	Block transfer = generateBlock(generateTransfer(sender, receiver, amount), hashBlock(blockVector.back(), threshold));
 	if (transfer.transaction.type == TransactionType::INVALID) {
-		return -1;
+		return -2;
 	}
 
 	Block receipt = generateBlock(generateReceipt(transfer), hashBlock(transfer, threshold));
 	if (receipt.transaction.type == TransactionType::INVALID) {
-		return -2;
+		return -3;
 	}
 
 	Block ret = generateBlock(generateReturn(transfer, receipt), hashBlock(receipt, threshold));
@@ -236,52 +251,59 @@ int sendAmount(unsigned sender, unsigned receiver, unsigned amount) {
 	return 0;
 }
 
+void printBlock(Block const& block) {
+	std::cout << block.index << " (#" << block.prevHash << "): ";
+
+	//print based on transaction type
+	switch (block.transaction.type) {
+		case TransactionType::INVALID:
+			std::cout << "INVALID" << std::endl;
+		break;
+
+		case TransactionType::GENERATE:
+			std::cout << "GENERATE " << block.transaction.transfer.receiverAccount << " received " << block.transaction.transfer.amount << std::endl;
+		break;
+
+		case TransactionType::TRANSFER:
+			std::cout << "TRANSFER " << block.transaction.transfer.senderAccount << " sent " << block.transaction.transfer.amount << " to " << block.transaction.transfer.receiverAccount << std::endl;
+		break;
+
+		case TransactionType::RECEIPT:
+			std::cout << "RECEIPT " << block.transaction.receipt.account << " now has " << block.transaction.receipt.balance << std::endl;
+		break;
+
+		default:
+			std::cout << "error" << std::endl;
+		break;
+	}
+}
+
 int main(int argc, char* argv[]) {
 	std::cout << "Blank size: " << blankSize << std::endl;
 	std::cout << "Trans size: " << sizeof(Transaction) << std::endl;
 	std::cout << "Block size: " << sizeof(Block) << std::endl;
 
 	//genesis block
-	blockVector.push_back(generateBlock(generateBlank("Kayne Ruse 2021!"), 42));
-	sendAmount(0, 1, 50);
-	sendAmount(0, 1, 50);
-	sendAmount(0, 1, 50);
-	sendAmount(0, 1, 50);
-	sendAmount(1, 1, 50);
-	sendAmount(1, 1, 50);
-	sendAmount(1, 1, 50);
-	sendAmount(1, 1, 50);
-	sendAmount(1, 2, 75);
-	sendAmount(1, 2, 75);
-	sendAmount(1, 2, 75);
-	sendAmount(1, 2, 75);
+	{
+		ProfileTimer timer("time taken");
+		blockVector.push_back(generateBlock(generateBlank("Kayne Ruse 2021!"), 42));
+		sendAmount(0, 1, 50);
+		sendAmount(0, 1, 50);
+		sendAmount(0, 1, 50);
+		sendAmount(0, 1, 50);
+		sendAmount(1, 1, 50);
+		sendAmount(1, 1, 50);
+		sendAmount(1, 1, 50);
+		sendAmount(1, 1, 50);
+		sendAmount(1, 2, 75);
+		sendAmount(1, 2, 75);
+		sendAmount(1, 2, 75);
+		sendAmount(1, 2, 75);
+	}
 
 	//debug
 	for (Block block : blockVector) {
-		std::cout << block.index << " (" << block.prevHash << "): ";
-
-		//print based on transaction type
-		switch (block.transaction.type) {
-			case TransactionType::INVALID:
-				std::cout << "INVALID" << std::endl;
-			break;
-
-			case TransactionType::GENERATE:
-				std::cout << "GENERATE " << block.transaction.transfer.receiverAccount << " received " << block.transaction.transfer.amount << std::endl;
-			break;
-
-			case TransactionType::TRANSFER:
-				std::cout << "TRANSFER " << block.transaction.transfer.senderAccount << " sent " << block.transaction.transfer.amount << " to " << block.transaction.transfer.receiverAccount << std::endl;
-			break;
-
-			case TransactionType::RECEIPT:
-				std::cout << "RECEIPT " << block.transaction.receipt.account << " now has " << block.transaction.receipt.balance << std::endl;
-			break;
-
-			default:
-				std::cout << "error" << std::endl;
-			break;
-		}
+		printBlock(block);
 	}
 
 	return 0;

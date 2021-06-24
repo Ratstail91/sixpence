@@ -28,7 +28,7 @@ all: $(OBJ)
 debug: export CXXFLAGS+=-g
 debug: all
 
-release: export CXXFLAGS+=-O2
+release: export CXXFLAGS+=-O3
 release: clean all
 
 rebuild: clean all
